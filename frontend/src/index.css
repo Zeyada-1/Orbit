@@ -1,0 +1,83 @@
+@import "tailwindcss";
+
+@layer base {
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background-color: #0f0f1a;
+    color: #e2e8f0;
+    font-family: 'Inter', system-ui, sans-serif;
+    min-height: 100vh;
+  }
+
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: #1a1a2e; }
+  ::-webkit-scrollbar-thumb { background: #7c3aed; border-radius: 3px; }
+}
+
+/* Component-level classes — utility classes like pl-9 properly override these */
+@layer components {
+  .input-field {
+    background: rgba(15, 15, 26, 0.8);
+    border: 1px solid rgba(124, 58, 237, 0.3);
+    border-radius: 0.75rem;
+    padding: 0.65rem 1rem;
+    color: #e2e8f0;
+    width: 100%;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .input-field:focus { border-color: #7c3aed; box-shadow: 0 0 0 3px rgba(124,58,237,0.15); }
+  .input-field::placeholder { color: #64748b; }
+}
+
+@layer utilities {
+  .glass {
+    background: rgba(22, 33, 62, 0.85);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(124, 58, 237, 0.25);
+    border-radius: 1rem;
+  }
+
+  .glow { box-shadow: 0 0 24px rgba(124, 58, 237, 0.35); }
+  .glow-gold { box-shadow: 0 0 24px rgba(245, 158, 11, 0.45); }
+
+  .xp-bar {
+    background: linear-gradient(90deg, #7c3aed, #a78bfa);
+    border-radius: 9999px;
+    transition: width 0.6s ease;
+  }
+
+  .priority-low  { color: #10b981; }
+  .priority-med  { color: #f59e0b; }
+  .priority-high { color: #ef4444; }
+
+  .btn-primary {
+    background: linear-gradient(135deg, #7c3aed, #6d28d9);
+    color: white;
+    border: none;
+    border-radius: 0.75rem;
+    padding: 0.6rem 1.4rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 20px rgba(124,58,237,0.5); }
+
+  .btn-ghost {
+    background: transparent;
+    color: #a78bfa;
+    border: 1px solid rgba(124,58,237,0.4);
+    border-radius: 0.75rem;
+    padding: 0.6rem 1.4rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-ghost:hover { background: rgba(124,58,237,0.15); }
+
+  /* Hide scrollbar for drum-roll pickers */
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+}
+
