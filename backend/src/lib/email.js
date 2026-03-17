@@ -1,21 +1,11 @@
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 
 const APP_URL = process.env.APP_URL || 'http://localhost:5173';
-const FROM = process.env.SMTP_FROM || '"Orbit" <no-reply@orbit.app>';
+const FROM = process.env.SMTP_FROM || 'Orbit <onboarding@resend.dev>';
 
-function createTransporter() {
-  const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env;
-  if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) return null;
-  return nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: parseInt(SMTP_PORT || '587'),
-    secure: parseInt(SMTP_PORT || '587') === 465,
-    auth: { user: SMTP_USER, pass: SMTP_PASS },
-    family: 4,
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 15000,
-  });
+function getResend() {
+  if (!process.env.RESEND_API_KEY) return null;
+  return new Resend(process.env.RESEND_API_KEY);
 }
 
 function emailWrapper(content) {
@@ -59,9 +49,8 @@ function emailWrapper(content) {
 
 export async function sendVerificationEmail(to, token) {
   const link = `${APP_URL}/verify-email?token=${token}`;
-  const transporter = createTransporter();
-  if (!transporter) {
-    // Dev fallback: log a truncated token so the full secret isn't in logs
+  const resend = getResend();
+  if (!resend) {
     console.log(`[EMAIL] Verification link for ${to} (token: ${token.slice(0, 8)}...)`);
     return;
   }
@@ -71,7 +60,7 @@ export async function sendVerificationEmail(to, token) {
     <a href="${link}" style="display:inline-block;background:linear-gradient(135deg,#ea580c,#c2410c);color:#ffffff;padding:13px 32px;border-radius:10px;text-decoration:none;font-weight:600;font-size:15px;letter-spacing:0.1px;">Verify Email Address</a>
     <p style="margin:24px 0 0;font-size:13px;color:#a8a29e;">This link expires in <strong style="color:#78716c;">24 hours</strong>. If you didn't create an account, you can ignore this email.</p>
   `;
-  await transporter.sendMail({
+  await resend.emails.send({
     from: FROM,
     to,
     subject: 'Verify your Orbit email address',
@@ -81,9 +70,8 @@ export async function sendVerificationEmail(to, token) {
 
 export async function sendPasswordResetEmail(to, token) {
   const link = `${APP_URL}/reset-password?token=${token}`;
-  const transporter = createTransporter();
-  if (!transporter) {
-    // Dev fallback: log a truncated token so the full secret isn't in logs
+  const resend = getResend();
+  if (!resend) {
     console.log(`[EMAIL] Password reset link for ${to} (token: ${token.slice(0, 8)}...)`);
     return;
   }
@@ -93,7 +81,7 @@ export async function sendPasswordResetEmail(to, token) {
     <a href="${link}" style="display:inline-block;background:linear-gradient(135deg,#ea580c,#c2410c);color:#ffffff;padding:13px 32px;border-radius:10px;text-decoration:none;font-weight:600;font-size:15px;letter-spacing:0.1px;">Reset Password</a>
     <p style="margin:24px 0 0;font-size:13px;color:#a8a29e;">This link expires in <strong style="color:#78716c;">1 hour</strong>. If you didn't request a reset, your password will remain unchanged.</p>
   `;
-  await transporter.sendMail({
+  await resend.emails.send({
     from: FROM,
     to,
     subject: 'Reset your Orbit password',
