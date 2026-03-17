@@ -14,6 +14,9 @@ import orbitRoutes from './routes/orbit.js';
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Trust Railway's reverse proxy so rate-limit / IP detection works
+app.set('trust proxy', 1);
+
 // Security headers
 app.use(helmet());
 
