@@ -1,20 +1,21 @@
 ﻿import { useState, useEffect, useRef } from 'react';
 import { useTheme } from '../context/ThemeContext';
 import { motion, AnimatePresence, useMotionValue, useSpring } from 'framer-motion';
-import { Plus, X, Trash2, ChevronLeft, Check, Pencil, Moon, Sun } from 'lucide-react';
+import { Plus, X, Trash2, ChevronLeft, Check, Pencil, Moon, Sun, ListChecks, Circle, CheckCircle2, ChevronRight, GripVertical } from 'lucide-react';
 import api from '../lib/api';
 import toast from 'react-hot-toast';
 import AddTaskModal from '../components/AddTaskModal';
 import CreateOrbitModal from '../components/CreateOrbitModal';
+import sphereImage from '../assets/moon-sphere.png';
 
-/*  constants  */
+// constants
 const BASE_RADIUS     = 200;
 const RING_GAP        = 110;
 const SPHERE_SIZE     = 108;
 const RING_CAPACITIES = [5, 8, 11, 14, 17];
 const RING_DURATIONS  = [30, 42, 54, 66, 78];
 
-/*  helpers  */
+// helpers
 function completionOf(node) {
   if (!node.subtasks || node.subtasks.length === 0) return node.completed ? 1 : 0;
   const total = countLeaves(node);
@@ -32,11 +33,22 @@ function countDoneLeaves(node) {
 function hasChildren(node) {
   return node.subtasks && node.subtasks.length > 0;
 }
+function findTaskById(tasks, id) {
+  for (const task of tasks || []) {
+    if (task.id === id) return task;
+    const child = findTaskById(task.subtasks || [], id);
+    if (child) return child;
+  }
+  return null;
+}
+function dueLabel(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
 
-/*  ring distribution 
-   Planets are distributed across concentric rings. Every planet on the SAME
-   ring shares an identical duration so they never collide with each other.
-*/
+// ring distribution
 function assignRings(planets) {
   const result = [];
   let pool = [...planets];
@@ -50,20 +62,16 @@ function assignRings(planets) {
   return result;
 }
 
-/*  Shared ring phase — ALL planets in a ring call this with the SAME t0 and dur,
-    so dPhase/dt is identical for every planet → spacing is always perfectly equal.
-    The wobble makes the whole group breathe (speed up / slow down) together.
-*/
+// shared ring phase with wobble
 function ringPhaseAt(elapsedSec, dur) {
   const base   = (elapsedSec / dur) * 360;
-  // Gentle sinusoidal wobble: amplitude ±22°, period = dur * 1.618 (golden ratio → aperiodic feel)
   const wobble = 22 * Math.sin((2 * Math.PI / (dur * 1.618)) * elapsedSec);
   return base + wobble;
 }
 
 const REDIST_MS = 480;
 
-// Galaxy particle layer — adapts to dark/light mode
+// GalaxyParticles
 function GalaxyParticles({ dark }) {
   const canvasRef = useRef(null);
   useEffect(() => {
@@ -109,7 +117,6 @@ function GalaxyParticles({ dark }) {
           }
         } else {
           ctx.shadowBlur = 0;
-          // light mode: warm dark-brown main dots + amber-gold accent dots
           ctx.fillStyle = p.warm
             ? `rgba(200,140,60,${alpha})`
             : `rgba(115,92,65,${alpha})`;
@@ -134,7 +141,7 @@ function GalaxyParticles({ dark }) {
   );
 }
 
-// Occasional shooting stars
+// ShootingStars
 function ShootingStars({ dark }) {
   const canvasRef = useRef(null);
   useEffect(() => {
@@ -200,26 +207,24 @@ function ShootingStars({ dark }) {
   );
 }
 
-function SpinningOrbit({ children, radius, ringIndex, posInRing, ringSize, cx, cy, ringStartTime, isNew, speeding, angleRef }) {
+function SpinningOrbit({ children, radius, ringIndex, posInRing, ringSize, cx, cy, ringStartTime, speeding, angleRef }) {
   const PLANET_HALF = 19;
   const dur = RING_DURATIONS[Math.min(ringIndex, RING_DURATIONS.length - 1)];
 
   const elRef  = useRef(null);
   const rafRef = useRef(null);
-  // Keep latest prop values accessible inside the RAF callback without re-creating it
   const pRef   = useRef({ cx, cy, radius, dur, t0: ringStartTime ?? Date.now() });
   pRef.current = { cx, cy, radius, dur, t0: ringStartTime ?? Date.now() };
 
   const spacingOffset = (posInRing / Math.max(ringSize, 1)) * 360;
 
-  // All mutable animation state lives here; never triggers re-renders
   const sRef = useRef(null);
   if (!sRef.current) {
     sRef.current = {
       mode: 'orbit',
       spacingOff: spacingOffset,
       redistFrom: 0, redistDelta: 0, redistStart: 0, redistNewOff: 0,
-      enterStart: null, // set by useEffect below when isNew fires
+      enterStart: Date.now(),
       enterDur:   750,
       speeding:   false,
       speedStart: 0,
@@ -227,15 +232,6 @@ function SpinningOrbit({ children, radius, ringIndex, posInRing, ringSize, cx, c
     };
   }
 
-  // Trigger enter animation when parent signals this planet is newly added.
-  // useEffect is safe from Strict Mode double-render; it fires once after real mount.
-  useEffect(() => {
-    if (isNew && sRef.current && sRef.current.enterStart === null) {
-      sRef.current.enterStart = Date.now();
-    }
-  }, [isNew]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Single RAF loop for the lifetime of this component
   useEffect(() => {
     const tick = () => {
       const el = elRef.current;
@@ -244,7 +240,6 @@ function SpinningOrbit({ children, radius, ringIndex, posInRing, ringSize, cx, c
       const pr = pRef.current;
       let angle;
 
-      // Enter: grow radius from 0 → target while orbiting normally
       let displayRadius = pr.radius;
       if (s.enterStart !== null) {
         const ep = Math.min((Date.now() - s.enterStart) / s.enterDur, 1);
@@ -253,16 +248,13 @@ function SpinningOrbit({ children, radius, ringIndex, posInRing, ringSize, cx, c
         if (ep >= 1) s.enterStart = null;
       }
 
-      // Speed-up: stays locked on the orbit ring but spins with a quadratic velocity ramp
       if (s.speeding) {
         const age = (Date.now() - s.speedStart) / 1000;
-        const k   = 5;   // matches the k used in handleToggle to predict final position
-        // Integrated velocity (w = w0*(1+k*t)): Δangle = w0*(age + k*age²/2)
+        const k   = 5;
         angle = s.speedAngle + (360 / pr.dur) * (age + k * age * age / 2);
-        // radius unchanged — planet stays on its orbit ring
       } else if (s.mode === 'redist') {
         const p = Math.min((Date.now() - s.redistStart) / REDIST_MS, 1);
-        const e = p < 0.5 ? 2*p*p : -1 + (4 - 2*p)*p; // smooth-step ease-in-out
+        const e = p < 0.5 ? 2*p*p : -1 + (4 - 2*p)*p;
         angle   = s.redistFrom + s.redistDelta * e;
         if (p >= 1) {
           s.mode      = 'orbit';
@@ -282,7 +274,6 @@ function SpinningOrbit({ children, radius, ringIndex, posInRing, ringSize, cx, c
     return () => cancelAnimationFrame(rafRef.current);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Speed-up mode: snapshot current angle so acceleration continues smoothly from here
   useEffect(() => {
     if (speeding && sRef.current && !sRef.current.speeding) {
       const s  = sRef.current;
@@ -304,16 +295,14 @@ function SpinningOrbit({ children, radius, ringIndex, posInRing, ringSize, cx, c
     }
   }, [speeding]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // When posInRing/ringSize changes, smoothly slide to the new equally-spaced position
   const isFirstMount = useRef(true);
   useEffect(() => {
     if (isFirstMount.current) { isFirstMount.current = false; return; }
-    if (ringSize === 1) return; // last planet in ring — no peer to space against, stay put
+    if (ringSize === 1) return;
 
     const s  = sRef.current;
     const pr = pRef.current;
 
-    // Where is the planet right now?
     let fromDeg;
     if (s.mode === 'redist') {
       const p = Math.min((Date.now() - s.redistStart) / REDIST_MS, 1);
@@ -324,12 +313,9 @@ function SpinningOrbit({ children, radius, ringIndex, posInRing, ringSize, cx, c
       fromDeg = ringPhaseAt(elapsed, pr.dur) + s.spacingOff;
     }
 
-    // Target: ring position at the moment the transition finishes — so orbit resumes
-    // exactly on-beat with no position jump.
     const elapsedAtEnd = (Date.now() + REDIST_MS - pr.t0) / 1000;
     const toDeg        = ringPhaseAt(elapsedAtEnd, pr.dur) + spacingOffset;
 
-    // Take the shorter arc
     let delta = toDeg - fromDeg;
     while (delta >  180) delta -= 360;
     while (delta < -180) delta += 360;
@@ -348,9 +334,9 @@ function SpinningOrbit({ children, radius, ringIndex, posInRing, ringSize, cx, c
   );
 }
 
-/* ── Planet ─────────────────────────────────────────────────────────────────── */
+// Planet
 function Planet({ node, orbitRadius, ringIndex, posInRing, ringSize,
-                  index, total, onToggle, onDelete, onExpand, spinning, zoom, cx, cy, ringStartTime, isNew, speeding, angleRef }) {
+                  index, total, onToggle, onDelete, onExpand, spinning, zoom, cx, cy, ringStartTime, speeding, angleRef }) {
   const [hovered, setHovered] = useState(false);
   const prog       = completionOf(node);
   const isComplete = prog >= 1 && countLeaves(node) > 0;
@@ -476,13 +462,13 @@ function Planet({ node, orbitRadius, ringIndex, posInRing, ringSize,
 
   return (
     <SpinningOrbit radius={orbitRadius} ringIndex={ringIndex} posInRing={posInRing} ringSize={ringSize}
-      cx={cx} cy={cy} ringStartTime={ringStartTime} isNew={isNew} speeding={speeding} angleRef={angleRef}>
+      cx={cx} cy={cy} ringStartTime={ringStartTime} speeding={speeding} angleRef={angleRef}>
       {sphere}
     </SpinningOrbit>
   );
 }
 
-/* ── Full-screen orbit view ─────────────────────────────────────────────────── */
+// OrbitView
 function OrbitView({ node, onClose, onUpdate, cardRect = null, depth = 0 }) {
   const [showAddForm, setShowAddForm]       = useState(false);
   const [newTitle, setNewTitle]             = useState('');
@@ -494,11 +480,16 @@ function OrbitView({ node, onClose, onUpdate, cardRect = null, depth = 0 }) {
   const [expandedChild, setExpandedChild]   = useState(null);
   const [zoom, setZoom]                   = useState(1);
   const [escapingPlanets, setEscapingPlanets] = useState({});
+  const [showSubtaskMenu, setShowSubtaskMenu] = useState(true);
+  const [sphereSkin, setSphereSkin]       = useState(() => localStorage.getItem('orbit-sphere-skin') || 'moon');
+  const [togglingIds, setTogglingIds]     = useState(() => new Set());
+  const [menuPos, setMenuPos]             = useState({ x: 20, y: 74 });
+  const menuDragRef                       = useRef(null);
+  const menuDragStart                     = useRef(null);
   const [goneIds, setGoneIds]             = useState(() => new Set(
     (node.subtasks || []).filter(s => s.completed).map(s => s.id)
   ));
 
-  // Inverse parallax — mouse offset drives a subtle counter-shift of the arena
   const rawX = useMotionValue(0);
   const rawY = useMotionValue(0);
   const px   = useSpring(rawX, { stiffness: 60, damping: 18, mass: 0.8 });
@@ -506,14 +497,12 @@ function OrbitView({ node, onClose, onUpdate, cardRect = null, depth = 0 }) {
   const handleMouseMove = (e) => {
     const cx = window.innerWidth  / 2;
     const cy = window.innerHeight / 2;
-    // inverse: arena moves opposite to the mouse, capped at ±18px
     rawX.set(-((e.clientX - cx) / cx) * 18);
     rawY.set(-((e.clientY - cy) / cy) * 18);
   };
   const handleMouseLeave = () => { rawX.set(0); rawY.set(0); };
-  const { dark, setDark } = useTheme();
 
-  const T = dark ? {
+  const T = {
     bg:          '#0e0c0a',
     outerRing:   (i) => i === 0 ? '#f97316' : 'rgba(255,255,255,0.18)',
     trackBand:   'rgba(249,115,22,0.07)',
@@ -527,20 +516,6 @@ function OrbitView({ node, onClose, onUpdate, cardRect = null, depth = 0 }) {
     panelPct:    'rgba(255,255,255,0.5)',
     panelLabel:  'rgba(255,255,255,0.3)',
     addColor:    'rgba(255,255,255,0.4)',
-  } : {
-    bg:          '#eae6df',
-    outerRing:   (i) => i === 0 ? 'rgba(249,115,22,0.5)' : '#c8c3bb',
-    trackBand:   'rgba(0,0,0,0.03)',
-    trackDash:   'rgba(0,0,0,0.13)',
-    btnBg:       'rgba(255,255,255,0.92)',
-    btnBorder:   '#e5e3de',
-    btnColor:    '#57534e',
-    mutedText:   '#a8a29e',
-    panelBg:     'rgba(255,255,255,0.88)',
-    panelBorder: '#e5e3de',
-    panelPct:    '#78716c',
-    panelLabel:  '#a8a29e',
-    addColor:    '#a8a29e',
   };
 
   const [speedingIds, setSpeedingIds] = useState(() => new Set());
@@ -549,7 +524,6 @@ function OrbitView({ node, onClose, onUpdate, cardRect = null, depth = 0 }) {
   const planetAngleRefs  = useRef({});
 
   const subtasks      = node.subtasks || [];
-  // Hide tasks that have escaped (completed + animation played)
   const displaySubtasks = subtasks.filter(s => !goneIds.has(s.id));
 
   const total       = subtasks.length;
@@ -558,26 +532,42 @@ function OrbitView({ node, onClose, onUpdate, cardRect = null, depth = 0 }) {
   const totalLeaves = countLeaves(node);
   const isComplete  = prog >= 1 && totalLeaves > 0;
 
-  // Arena size stays stable based on ALL subtasks so it doesn't jump during completion
   const allAssignments = assignRings(subtasks);
   const numRingsStatic = allAssignments.length > 0
     ? Math.max(...allAssignments.map(a => a.ringIndex)) + 1 : 1;
 
-  const ringAssignments = assignRings(displaySubtasks);
-  const numRings  = ringAssignments.length > 0
-    ? Math.max(...ringAssignments.map(a => a.ringIndex)) + 1 : 1;  // eslint-disable-line no-unused-vars
+  const visibleIdSet = new Set(displaySubtasks.map(s => s.id));
+  const stableRingMap = new Map();
+  {
+    let pool = [...subtasks];
+    let ri = 0;
+    while (pool.length > 0) {
+      const cap = RING_CAPACITIES[Math.min(ri, RING_CAPACITIES.length - 1)];
+      const slice = pool.splice(0, cap);
+      slice.forEach(p => stableRingMap.set(p.id, ri));
+      ri++;
+    }
+  }
+  const stableRingGroups = {};
+  subtasks.forEach(p => {
+    if (!visibleIdSet.has(p.id)) return;
+    const ri = stableRingMap.get(p.id);
+    if (!stableRingGroups[ri]) stableRingGroups[ri] = [];
+    stableRingGroups[ri].push(p);
+  });
+  const ringAssignments = [];
+  Object.entries(stableRingGroups).forEach(([ri, planets]) => {
+    const ringIndex = Number(ri);
+    planets.forEach((p, pos) => {
+      ringAssignments.push({ planet: p, ringIndex, posInRing: pos, ringSize: planets.length });
+    });
+  });
   const maxRadius  = BASE_RADIUS + (numRingsStatic - 1) * RING_GAP;
   const arenaHalf  = maxRadius + 90;
   const arenaSize  = arenaHalf * 2;
   const sphereOff  = arenaHalf - SPHERE_SIZE / 2;
 
-  // Stable per-ring start time so all planets in a ring share the same phase origin
   const ringStartTimes = useRef({});
-  // joiningIds: planets that were just added — set via useEffect so Strict Mode double-render
-  // doesn't corrupt the detection. Cleared after the enter animation finishes.
-  // Pre-populate with existing IDs so opening an orbit doesn't burst planets from center.
-  const knownIds   = useRef(new Set(displaySubtasks.map(s => s.id)));
-  const [joiningIds, setJoiningIds] = useState(() => new Set());
 
   ringAssignments.forEach(({ planet: s, ringIndex }) => {
     if (ringStartTimes.current[ringIndex] === undefined)
@@ -585,25 +575,13 @@ function OrbitView({ node, onClose, onUpdate, cardRect = null, depth = 0 }) {
     if (!planetMountTime.current[s.id]) planetMountTime.current[s.id] = Date.now();
   });
 
-  // Detect truly new planets in an effect (immune to double-render)
-  useEffect(() => {
-    const currentIds = new Set(displaySubtasks.map(s => s.id));
-    const added = [...currentIds].filter(id => !knownIds.current.has(id));
-    knownIds.current = currentIds;
-    if (added.length > 0) {
-      setJoiningIds(new Set(added));
-      const t = setTimeout(() => setJoiningIds(new Set()), 900);
-      return () => clearTimeout(t);
-    }
-  }, [displaySubtasks]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const handleWheel = (e) => {
     e.preventDefault();
     setZoom(z => Math.min(2.5, Math.max(0.3, z - e.deltaY * 0.001)));
   };
 
   const requestToggle = (id) => {
-    const task = displaySubtasks.find(t => t.id === id);
+    const task = findTaskById(subtasks, id);
     const willComplete = task && !task.completed;
     if (!willComplete || localStorage.getItem('orbit-complete-skip') === '1') {
       handleToggle(id);
@@ -619,17 +597,19 @@ function OrbitView({ node, onClose, onUpdate, cardRect = null, depth = 0 }) {
   };
 
   const handleToggle = async (id) => {
-    const task = displaySubtasks.find(t => t.id === id);
+    const task = findTaskById(subtasks, id);
     const willComplete = task && !task.completed;
+    const isVisiblePlanet = displaySubtasks.some(t => t.id === id);
+    const shouldAnimateEscape = willComplete && isVisiblePlanet;
 
-    if (willComplete) {
+    setTogglingIds(prev => new Set([...prev, id]));
+
+    if (shouldAnimateEscape) {
       const meta = ringAssignments.find(a => a.planet.id === id);
       const escapeRadius = meta ? BASE_RADIUS + meta.ringIndex * RING_GAP : null;
 
-      // Phase 1: accelerate on orbit for 700ms
       setSpeedingIds(prev => new Set([...prev, id]));
 
-      // Phase 2: after speed-up, read live angle and launch tangentially
       setTimeout(() => {
         setSpeedingIds(prev => { const n = new Set(prev); n.delete(id); return n; });
         if (escapeRadius !== null) {
@@ -637,16 +617,16 @@ function OrbitView({ node, onClose, onUpdate, cardRect = null, depth = 0 }) {
           const rad  = (actualAngle * Math.PI) / 180;
           const x    = arenaHalf + Math.cos(rad) * escapeRadius;
           const y    = arenaHalf + Math.sin(rad) * escapeRadius;
-          // Tangential direction (perpendicular to radius) + slight outward bias
           const tanX = -Math.sin(rad);
           const tanY =  Math.cos(rad);
           const radX =  Math.cos(rad);
           const radY =  Math.sin(rad);
           const raw  = { x: tanX * 0.75 + radX * 0.35, y: tanY * 0.75 + radY * 0.35 };
           const len  = Math.sqrt(raw.x * raw.x + raw.y * raw.y);
+          const task = displaySubtasks.find(t => String(t.id) === String(id));
           setEscapingPlanets(prev => ({
             ...prev,
-            [id]: { x, y, dirX: raw.x / len, dirY: raw.y / len },
+            [id]: { x, y, dirX: raw.x / len, dirY: raw.y / len, title: task?.title || '' },
           }));
         }
       }, 700);
@@ -654,20 +634,24 @@ function OrbitView({ node, onClose, onUpdate, cardRect = null, depth = 0 }) {
 
     try {
       await api.patch(`/orbit/subtasks/${id}/toggle`);
-      if (willComplete) {
+      if (shouldAnimateEscape) {
         delete planetMountTime.current[id];
-        // Speed-up 700ms + escape 1100ms → then clean up
         setTimeout(() => {
           setEscapingPlanets(prev => { const n = { ...prev }; delete n[id]; return n; });
           setGoneIds(prev => new Set([...prev, id]));
+          setTogglingIds(prev => { const n = new Set(prev); n.delete(id); return n; });
           onUpdate();
         }, 700 + 1100);
       } else {
         setGoneIds(prev => { const n = new Set(prev); n.delete(id); return n; });
+        setTogglingIds(prev => { const n = new Set(prev); n.delete(id); return n; });
         onUpdate();
       }
     }
-    catch { toast.error('Failed to update'); }
+    catch {
+      setTogglingIds(prev => { const n = new Set(prev); n.delete(id); return n; });
+      toast.error('Failed to update');
+    }
   };
   const handleDelete = async (id) => {
     try { await api.delete(`/orbit/subtasks/${id}`); setExpandedChild(null); onUpdate(); }
@@ -692,28 +676,158 @@ function OrbitView({ node, onClose, onUpdate, cardRect = null, depth = 0 }) {
     );
   }
 
-  // Transform-origin set to card center so the view grows/shrinks from exactly where the card was
-  const originX = cardRect ? `${Math.round(cardRect.left + cardRect.width / 2)}px` : '50%';
-  const originY = cardRect ? `${Math.round(cardRect.top + cardRect.height / 2)}px` : '50%';
+  const handleMenuDragStart = (e) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const orig = { ...menuPos };
+    const onMove = (ev) => {
+      setMenuPos({
+        x: Math.max(0, Math.min(window.innerWidth - 360, orig.x + ev.clientX - startX)),
+        y: Math.max(0, Math.min(window.innerHeight - 200, orig.y + ev.clientY - startY)),
+      });
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  const allSubtasks = subtasks;
+
+  const renderSubtaskItem = (task, level = 0) => {
+    const complete = task.completed || (completionOf(task) >= 1 && countLeaves(task) > 0);
+    const hasNested = hasChildren(task);
+    const isEscaping = Boolean(escapingPlanets[task.id]);
+    const isSpeeding = speedingIds.has(task.id);
+    const isToggling = togglingIds.has(task.id);
+    const isBusy = isEscaping || isSpeeding || isToggling;
+    const due = dueLabel(task.dueDate);
+
+    return (
+      <div key={task.id} style={{ marginTop: level === 0 ? 0 : 4 }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '7px 10px',
+            borderRadius: 10,
+            background: complete
+              ? 'rgba(22,163,106,0.08)'
+              : 'rgba(255,255,255,0.03)',
+            marginLeft: level * 14,
+            transition: 'background 0.2s, opacity 0.25s',
+            opacity: isEscaping ? 0.5 : 1,
+          }}
+        >
+          <button
+            onClick={() => requestToggle(task.id)}
+            disabled={isBusy}
+            style={{
+              flexShrink: 0,
+              width: 22,
+              height: 22,
+              border: 'none',
+              borderRadius: '50%',
+              background: isToggling
+                ? 'rgba(249,115,22,0.18)'
+                : 'transparent',
+              cursor: isBusy ? 'default' : 'pointer',
+              color: complete ? '#16a34a' : '#d6d3d1',
+              padding: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'color 0.18s, background 0.18s, transform 0.15s',
+              transform: isToggling ? 'scale(0.85)' : 'scale(1)',
+            }}
+            onMouseEnter={e => { if (!isBusy) e.currentTarget.style.transform = 'scale(1.15)'; }}
+            onMouseLeave={e => { e.currentTarget.style.transform = isToggling ? 'scale(0.85)' : 'scale(1)'; }}
+            onMouseDown={e => { if (!isBusy) e.currentTarget.style.transform = 'scale(0.88)'; }}
+            onMouseUp={e => { if (!isBusy) e.currentTarget.style.transform = 'scale(1.15)'; }}
+            title={complete ? 'Mark as not done' : 'Mark as done'}
+          >
+            {isToggling
+              ? <div style={{ width: 14, height: 14, border: '2px solid #f97316', borderTop: '2px solid transparent', borderRadius: '50%', animation: 'spin 0.6s linear infinite' }} />
+              : complete ? <CheckCircle2 size={17} /> : <Circle size={17} />}
+          </button>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              style={{
+                fontSize: 12,
+                fontWeight: 600,
+                color: '#f5f5f4',
+                textDecoration: complete ? 'line-through' : 'none',
+                opacity: complete ? 0.55 : 1,
+                wordBreak: 'break-word',
+                transition: 'opacity 0.25s, color 0.2s',
+              }}
+            >
+              {task.title}
+            </div>
+            <div
+              style={{
+                marginTop: 2,
+                fontSize: 10,
+                color: '#a8a29e',
+                display: 'flex',
+                gap: 8,
+                flexWrap: 'wrap',
+              }}
+            >
+              {complete
+                ? <span style={{ color: '#16a34a', fontWeight: 600 }}>done</span>
+                : <span>{hasNested ? `${countDoneLeaves(task)}/${countLeaves(task)} done` : 'active'}</span>}
+              {task.priority && <span>{task.priority.toLowerCase()}</span>}
+              {due && <span>due {due}</span>}
+            </div>
+          </div>
+          {hasNested && (
+            <button
+              onClick={() => setExpandedChild(task.id)}
+              style={{
+                border: 'none',
+                background: 'none',
+                cursor: 'pointer',
+                color: '#d6d3d1',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 3,
+                fontSize: 10,
+                fontWeight: 600,
+                padding: '1px 0',
+              }}
+              title="Open nested orbit"
+            >
+              open <ChevronRight size={12} />
+            </button>
+          )}
+        </div>
+        {hasNested && task.subtasks.map(child => renderSubtaskItem(child, level + 1))}
+      </div>
+    );
+  };
 
   return (
     <motion.div
-      initial={{ opacity: 0, scale: 0.06 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.05 }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
       style={{ position: 'fixed', inset: 0, zIndex: 50,
-        transformOrigin: `${originX} ${originY}`,
         background: T.bg,
         display: 'flex', flexDirection: 'column',
         alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
-      transition={{ type: 'spring', stiffness: 400, damping: 40 }}
+      transition={{ duration: 0.25, ease: 'easeOut' }}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
 
       {/* Drifting particles */}
-      <GalaxyParticles dark={dark} />
-      <ShootingStars dark={dark} />
+      <GalaxyParticles dark={true} />
+      <ShootingStars dark={true} />
 
       {/* Decorative concentric rings */}
       <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 0 }}
@@ -736,15 +850,47 @@ function OrbitView({ node, onClose, onUpdate, cardRect = null, depth = 0 }) {
         <ChevronLeft size={14} />{depth > 0 ? 'Back' : 'Close'}
       </button>
 
-      {/* Dark / Light toggle */}
-      <button onClick={() => setDark(d => !d)}
-        style={{ position: 'absolute', top: 24, right: 70, zIndex: 60,
+
+
+      {/* Sphere skin toggle */}
+      <button onClick={() => {
+        const next = sphereSkin === 'moon' ? 'classic' : 'moon';
+        setSphereSkin(next);
+        localStorage.setItem('orbit-sphere-skin', next);
+      }}
+        style={{ position: 'absolute', top: 24, right: 24, zIndex: 60,
           display: 'flex', alignItems: 'center', gap: 5, background: T.btnBg,
           border: `1px solid ${T.btnBorder}`, borderRadius: 10, padding: '6px 12px',
           fontSize: 12, fontWeight: 600, color: T.btnColor, cursor: 'pointer',
           boxShadow: '0 1px 4px rgba(0,0,0,0.3)', transition: 'background 0.4s, color 0.4s, border-color 0.4s' }}>
-        {dark ? <Sun size={13} /> : <Moon size={13} />}
-        {dark ? 'Light' : 'Dark'}
+        {sphereSkin === 'moon' ? <Moon size={13} /> : <Sun size={13} />}
+        {sphereSkin === 'moon' ? 'Moon' : 'Classic'}
+      </button>
+
+      {/* Subtask menu toggle — left side, near Close button */}
+      <button
+        onClick={() => setShowSubtaskMenu(v => !v)}
+        style={{
+          position: 'absolute',
+          top: 24,
+          left: 120,
+          zIndex: 60,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          background: T.btnBg,
+          border: `1px solid ${T.btnBorder}`,
+          borderRadius: 10,
+          padding: '6px 12px',
+          fontSize: 12,
+          fontWeight: 600,
+          color: T.btnColor,
+          cursor: 'pointer',
+          boxShadow: '0 1px 4px rgba(0,0,0,0.3)',
+        }}
+      >
+        <ListChecks size={13} />
+        {showSubtaskMenu ? 'Hide List' : 'Subtasks'}
       </button>
 
       {depth > 0 && (
@@ -804,40 +950,96 @@ function OrbitView({ node, onClose, onUpdate, cardRect = null, depth = 0 }) {
         <span style={{ fontSize: 9, color: T.panelLabel, userSelect: 'none', textTransform: 'uppercase', letterSpacing: 0.5 }}>zoom</span>
       </div>
 
-      {/* Edit orbit button — translucent, solid on hover like zoom slider */}
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <AnimatePresence>
+        {showSubtaskMenu && (
+          <motion.div
+            initial={{ opacity: 0, x: -16 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -16 }}
+            transition={{ duration: 0.22 }}
+            style={{
+              position: 'absolute',
+              left: menuPos.x,
+              top: menuPos.y,
+              width: 'min(320px, calc(100vw - 100px))',
+              maxHeight: 'calc(100vh - 120px)',
+              zIndex: 60,
+              background: T.panelBg,
+              border: `1px solid ${T.panelBorder}`,
+              borderRadius: 16,
+              backdropFilter: 'blur(7px)',
+              boxShadow: '0 12px 34px rgba(0,0,0,0.42)',
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
+            <div
+              style={{
+                padding: '10px 12px',
+                borderBottom: `1px solid ${T.panelBorder}`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                cursor: 'grab',
+              }}
+              onMouseDown={handleMenuDragStart}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <GripVertical size={14} style={{ color: T.panelLabel, flexShrink: 0 }} />
+                <div>
+                  <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: '#f5f5f4' }}>Subtasks</p>
+                  <p style={{ margin: '2px 0 0', fontSize: 10, color: T.panelLabel }}>{doneLeaves}/{totalLeaves} complete</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowSubtaskMenu(false)}
+                style={{ border: 'none', background: 'none', color: T.panelLabel, cursor: 'pointer', padding: 0 }}
+                title="Close subtask menu"
+              >
+                <X size={14} />
+              </button>
+            </div>
+            <div style={{ padding: 8, overflowY: 'auto', flex: 1 }}>
+              {allSubtasks.length === 0 ? (
+                <p style={{ margin: 6, fontSize: 11, color: T.panelLabel }}>No subtasks yet</p>
+              ) : (
+                allSubtasks.map(task => renderSubtaskItem(task))
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <button className="orbit-edit-btn" onClick={() => setEditingCenter(node)}
         style={{
-          position: 'absolute', left: 20, top: '50%',
-          transform: 'translateY(-50%)',
-          zIndex: 60,
+          position: 'absolute', right: 20, bottom: 90,
+          zIndex: 59,
           display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
-          background: dark ? 'rgba(28, 22, 17, 0.92)' : 'rgba(255,255,255,0.9)',
-          border: dark ? '1px solid rgba(251,146,60,0.45)' : `1px solid ${T.panelBorder}`,
+          background: 'rgba(28, 22, 17, 0.92)',
+          border: '1px solid rgba(251,146,60,0.45)',
           borderRadius: 20, padding: '14px 14px',
           backdropFilter: 'blur(6px)',
-          boxShadow: dark ? '0 0 0 1px rgba(251,146,60,0.2), 0 10px 24px rgba(0,0,0,0.28)' : '0 8px 20px rgba(0,0,0,0.08)',
+          boxShadow: '0 0 0 1px rgba(251,146,60,0.2), 0 10px 24px rgba(0,0,0,0.28)',
           cursor: 'pointer',
           transition: 'background 0.4s, border-color 0.4s',
         }}>
-        <Pencil size={16} style={{ color: dark ? '#fb923c' : T.panelPct }} />
-        <span style={{ fontSize: 10, color: dark ? '#fdba74' : T.panelLabel, userSelect: 'none', textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 700 }}>edit task</span>
+        <Pencil size={16} style={{ color: '#fb923c' }} />
+        <span style={{ fontSize: 10, color: '#fdba74', userSelect: 'none', textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 700 }}>edit task</span>
       </button>
 
-      {/* Zoomable orbit arena */}
       <div ref={arenaRef} onWheel={handleWheel}
         style={{ width: '100%', height: '100%', display: 'flex',
           alignItems: 'center', justifyContent: 'center', overflow: 'hidden', zIndex: 1 }}>
-        {/* Parallax wrapper — only handles x/y offset */}
         <motion.div style={{ x: px, y: py, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          {/* Zoom wrapper — only handles scale */}
           <div style={{ zoom: zoom, flexShrink: 0 }}>
 
-          {/* Arena  all coordinates relative to this div */}
           <div style={{ position: 'relative', width: arenaSize, height: arenaSize }}>
 
             {/* Rings + progress arcs  use pixel cx/cy so they align with planet CSS positions */}
             <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', overflow: 'visible' }}>
-              {Array.from({ length: numRings }).map((_, ri) => {
+              {Array.from({ length: numRingsStatic }).map((_, ri) => {
                 const r = BASE_RADIUS + ri * RING_GAP;
                 return (
                   <g key={ri}>
@@ -850,11 +1052,63 @@ function OrbitView({ node, onClose, onUpdate, cardRect = null, depth = 0 }) {
               })}
             </svg>
 
-            {/* Center sphere  positioned with explicit pixel offsets so no CSS transform
-                conflict with framer-motion scale animation */}
+            {/* Center sphere — both skins always mounted for instant switching, no FPS drop */}
+            {/* Moon skin */}
             <motion.div
-              animate={isComplete ? { scale: [1, 1.07, 1] } : { scale: 1 }}
-              transition={{ duration: 0.6, type: 'spring' }}
+              key="skin-moon"
+              animate={sphereSkin === 'moon'
+                ? { scale: 1, opacity: 1 }
+                : { scale: 0, opacity: 0 }}
+              transition={sphereSkin === 'moon'
+                ? { type: 'spring', stiffness: 420, damping: 28 }
+                : { duration: 0.15, ease: 'easeIn' }}
+              style={{
+                position: 'absolute',
+                top: sphereOff,
+                left: sphereOff,
+                width: SPHERE_SIZE,
+                height: SPHERE_SIZE,
+                borderRadius: '50%',
+                overflow: 'hidden',
+                background: '#0a0a0a',
+                userSelect: 'none', zIndex: 10,
+                cursor: 'pointer',
+                willChange: 'transform',
+                pointerEvents: sphereSkin === 'moon' ? 'auto' : 'none',
+              }}
+              onMouseEnter={() => setCenterHovered(true)}
+              onMouseLeave={() => setCenterHovered(false)}>
+              <img
+                src={sphereImage}
+                alt=""
+                draggable={false}
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'cover',
+                  display: 'block',
+                  pointerEvents: 'none',
+                }}
+              />
+              <div style={{
+                position: 'absolute', inset: 0,
+                borderRadius: '50%',
+                boxShadow: 'inset 0 0 6px 4px #0a0a0a',
+                pointerEvents: 'none',
+              }} />
+            </motion.div>
+
+            {/* Classic skin */}
+            <motion.div
+              key="skin-classic"
+              animate={sphereSkin === 'classic'
+                ? (isComplete ? { scale: [1, 1.07, 1], opacity: 1 } : { scale: 1, opacity: 1 })
+                : { scale: 0, opacity: 0 }}
+              transition={sphereSkin === 'classic'
+                ? { type: 'spring', stiffness: 420, damping: 28 }
+                : { duration: 0.15, ease: 'easeIn' }}
               style={{
                 position: 'absolute',
                 top: sphereOff,
@@ -866,63 +1120,76 @@ function OrbitView({ node, onClose, onUpdate, cardRect = null, depth = 0 }) {
                 boxShadow: isComplete
                   ? '0 0 0 6px rgba(249,115,22,0.2), 0 10px 32px rgba(234,88,12,0.35), inset 0 0 24px rgba(0,0,0,0.18)'
                   : 'inset 0 0 20px rgba(0,0,0,0.12), 0 8px 28px rgba(234,88,12,0.22)',
-                display: 'flex', flexDirection: 'column',
-                alignItems: 'center', justifyContent: 'center',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
                 userSelect: 'none', zIndex: 10,
                 cursor: 'pointer',
+                willChange: 'transform',
+                pointerEvents: sphereSkin === 'classic' ? 'auto' : 'none',
               }}
               onMouseEnter={() => setCenterHovered(true)}
-              onMouseLeave={() => setCenterHovered(false)}>
-              <p style={{ fontSize: 10, fontWeight: 700, lineHeight: 1.3, textAlign: 'center',
-                padding: '0 12px', color: 'rgba(255,255,255,0.95)',
-                maxWidth: 96, wordBreak: 'break-word' }}>{node.title}</p>
+              onMouseLeave={() => setCenterHovered(false)} />
+
+            {/* Edit button — outside the sphere so overflow:hidden doesn't clip it */}
+            <AnimatePresence>
+              {centerHovered && (
+                <motion.button
+                  initial={{ opacity: 0, scale: 0.7 }} animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.7 }}
+                  onClick={(e) => { e.stopPropagation(); setEditingCenter(node); }}
+                  style={{ position: 'absolute',
+                    top: sphereOff + 4, left: sphereOff + SPHERE_SIZE - 24,
+                    width: 20, height: 20,
+                    borderRadius: '50%', background: 'rgba(249,115,22,0.9)', color: 'white',
+                    border: 'none', cursor: 'pointer', zIndex: 20,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Pencil size={10} />
+                </motion.button>
+              )}
+            </AnimatePresence>
+
+            {/* Title + progress label below the sphere (both skins) */}
+            <div style={{
+              position: 'absolute',
+              top: sphereOff + SPHERE_SIZE + 8,
+              left: arenaHalf - 60,
+              width: 120,
+              textAlign: 'center',
+              zIndex: 11,
+              pointerEvents: 'none',
+            }}>
+              <p style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.85)',
+                textShadow: '0 2px 6px rgba(0,0,0,0.7)', margin: 0,
+                wordBreak: 'break-word', lineHeight: 1.3 }}>{node.title}</p>
               {totalLeaves > 0 && (
-                <p style={{ fontSize: 9, marginTop: 4,
-                  color: 'rgba(255,255,255,0.55)' }}>
+                <p style={{ fontSize: 9, marginTop: 3,
+                  color: 'rgba(255,255,255,0.55)',
+                  textShadow: '0 1px 4px rgba(0,0,0,0.5)' }}>
                   {doneLeaves}/{totalLeaves}
                 </p>
               )}
-              <AnimatePresence>
-                {centerHovered && (
-                  <motion.button
-                    initial={{ opacity: 0, scale: 0.7 }} animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.7 }}
-                    onClick={(e) => { e.stopPropagation(); setEditingCenter(node); }}
-                    style={{ position: 'absolute', top: 5, right: 5, width: 20, height: 20,
-                      borderRadius: '50%', background: 'rgba(249,115,22,0.9)', color: 'white',
-                      border: 'none', cursor: 'pointer', zIndex: 20,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Pencil size={10} />
-                  </motion.button>
-                )}
-              </AnimatePresence>
-            </motion.div>
+            </div>
 
             {/* Spinning planets — key = s.id so SpinningOrbit persists across redistribution */}
-            <AnimatePresence>
+            <AnimatePresence initial={false}>
               {ringAssignments
                 .filter(({ planet: s }) => !escapingPlanets[s.id])
                 .map(({ planet: s, ringIndex, posInRing, ringSize }) => {
                   const r = BASE_RADIUS + ringIndex * RING_GAP;
                   if (!planetAngleRefs.current[s.id]) planetAngleRefs.current[s.id] = { current: 0 };
+                  const isEscaping = Boolean(escapingPlanets[s.id]);
                   return (
                     <motion.div key={s.id}
                       style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
-                      initial={joiningIds.has(s.id)
-                        ? { opacity: 0, scale: 0.15 }
-                        : { opacity: 0 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0 }}
-                      transition={joiningIds.has(s.id)
-                        ? { duration: 0.6, ease: [0.34, 1.56, 0.64, 1] }
-                        : { duration: 0.01 }}>
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0, transition: { duration: 0 } }}
+                      transition={{ type: 'spring', stiffness: 200, damping: 18, mass: 0.6 }}>
                       <div style={{ pointerEvents: speedingIds.has(s.id) ? 'none' : 'auto' }}>
                         <Planet node={s} orbitRadius={r}
                           ringIndex={ringIndex} posInRing={posInRing} ringSize={ringSize}
                           index={0} total={1} spinning={true} zoom={zoom}
                           cx={arenaHalf} cy={arenaHalf}
                           ringStartTime={ringStartTimes.current[ringIndex]}
-                          isNew={joiningIds.has(s.id)}
                           speeding={speedingIds.has(s.id)}
                           onToggle={() => requestToggle(s.id)}
                           onDelete={() => handleDelete(s.id)}
@@ -934,9 +1201,10 @@ function OrbitView({ node, onClose, onUpdate, cardRect = null, depth = 0 }) {
                 })}
             </AnimatePresence>
 
-            {/* Escape overlays — orange sphere rockets away after spin-up */}
+            {/* Escape overlays — exact same planet flies away */}
             <AnimatePresence>
-              {Object.entries(escapingPlanets).map(([id, { x, y, dirX, dirY }]) => {
+              {Object.entries(escapingPlanets).map(([id, { x, y, dirX, dirY, title }]) => {
+                const showLabel = (zoom ?? 1) >= 0.85;
                 return (
                 <motion.div key={`esc-${id}`}
                   style={{
@@ -945,22 +1213,34 @@ function OrbitView({ node, onClose, onUpdate, cardRect = null, depth = 0 }) {
                     width: 38, height: 38,
                     marginLeft: -19, marginTop: -19,
                     borderRadius: '50%',
-                    background: 'radial-gradient(circle at 35% 30%, #e7e5e4 0%, #b8b4ae 60%)',
-                    border: '2px solid #8a8680',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+                    background: '#57534e',
+                    border: '2px solid #44403c',
+                    boxShadow: 'inset 0 0 10px rgba(0,0,0,0.22), 0 2px 6px rgba(0,0,0,0.28)',
                     pointerEvents: 'none',
                     zIndex: 30,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    overflow: 'hidden', padding: showLabel ? '2px 3px' : 0,
                   }}
-                  initial={{ x: 0, y: 0, opacity: 1, scale: 1 }}
+                  initial={{ x: 0, y: 0, scale: 1 }}
                   animate={{
                     x: dirX * 800,
                     y: dirY * 800,
-                    opacity: 0,
                     scale: 0.4,
                   }}
-                  transition={{ duration: 1.1, ease: [0.25, 0.1, 0.25, 1] }}
-                />
-              );})}
+                  transition={{ duration: 1.4, ease: [0.25, 0.1, 0.25, 1] }}
+                >
+                  {showLabel && title && (
+                    <span style={{
+                      fontSize: 7, fontWeight: 700, lineHeight: 1.2, textAlign: 'center',
+                      color: '#fafaf9', textShadow: '0 1px 3px rgba(0,0,0,0.9)',
+                      maxWidth: 32, wordBreak: 'break-word',
+                      display: '-webkit-box', WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                    }}>{title}</span>
+                  )}
+                </motion.div>
+              );
+              })}
             </AnimatePresence>
           </div>
         </div>
@@ -1036,7 +1316,7 @@ function OrbitView({ node, onClose, onUpdate, cardRect = null, depth = 0 }) {
           style={{
             position: 'absolute', inset: 0, zIndex: 200,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: dark ? 'rgba(10,8,7,0.72)' : 'rgba(0,0,0,0.38)',
+            background: 'rgba(10,8,7,0.72)',
             backdropFilter: 'blur(4px)',
           }}>
           <motion.div
@@ -1046,27 +1326,27 @@ function OrbitView({ node, onClose, onUpdate, cardRect = null, depth = 0 }) {
             transition={{ type: 'spring', stiffness: 380, damping: 32 }}
             onClick={e => e.stopPropagation()}
             style={{
-              background: dark ? '#1c1917' : '#fff',
-              border: `1px solid ${dark ? '#44403c' : '#e5e3de'}`,
+              background: '#1c1917',
+              border: '1px solid #44403c',
               borderRadius: 16,
               padding: '28px 32px',
               maxWidth: 340,
               width: '90%',
-              boxShadow: dark ? '0 18px 40px rgba(0,0,0,0.5)' : '0 8px 32px rgba(0,0,0,0.15)',
+              boxShadow: '0 18px 40px rgba(0,0,0,0.5)',
               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16,
             }}>
             <div style={{
               width: 48, height: 48, borderRadius: '50%',
-              background: dark ? 'rgba(249,115,22,0.12)' : 'rgba(249,115,22,0.08)',
+              background: 'rgba(249,115,22,0.12)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>
               <Check size={22} color="#f97316" />
             </div>
             <div style={{ textAlign: 'center' }}>
-              <p style={{ margin: 0, fontWeight: 700, fontSize: 16, color: dark ? '#f5f5f4' : '#1c1917' }}>
+              <p style={{ margin: 0, fontWeight: 700, fontSize: 16, color: '#f5f5f4' }}>
                 Mark this task as done?
               </p>
-              <p style={{ margin: '8px 0 0', fontSize: 13, color: dark ? '#c9c3bb' : '#78716c', maxWidth: 240 }}>
+              <p style={{ margin: '8px 0 0', fontSize: 13, color: '#c9c3bb', maxWidth: 240 }}>
                 {displaySubtasks.find(t => t.id === pendingToggleId)?.title}
               </p>
             </div>
@@ -1076,9 +1356,9 @@ function OrbitView({ node, onClose, onUpdate, cardRect = null, depth = 0 }) {
                 style={{
                   flex: 1, padding: '9px 14px', borderRadius: 10, cursor: 'pointer',
                   fontSize: 13, fontWeight: 600,
-                  background: dark ? '#292524' : '#f5f5f4',
-                  border: `1px solid ${dark ? '#57534e' : '#e5e3de'}`,
-                  color: dark ? '#e7e5e4' : '#57534e',
+                  background: '#292524',
+                  border: '1px solid #57534e',
+                  color: '#e7e5e4',
                 }}>
                 Cancel
               </button>
@@ -1096,7 +1376,7 @@ function OrbitView({ node, onClose, onUpdate, cardRect = null, depth = 0 }) {
               onClick={() => confirmToggle(true)}
               style={{
                 background: 'none', border: 'none', cursor: 'pointer',
-                fontSize: 11, color: dark ? '#78716c' : '#a8a29e',
+                fontSize: 11, color: '#78716c',
                 textDecoration: 'underline', padding: 0,
               }}>
               Don't show this again
@@ -1109,7 +1389,7 @@ function OrbitView({ node, onClose, onUpdate, cardRect = null, depth = 0 }) {
   );
 }
 
-/* ── Live animated orbit thumbnail ─────────────────────────────────────────── */
+// LiveOrbitThumbnail
 function LiveOrbitThumbnail({ activePlanets, size, radius }) {
   const canvasRef    = useRef(null);
   const rafRef       = useRef(null);
@@ -1128,7 +1408,6 @@ function LiveOrbitThumbnail({ activePlanets, size, radius }) {
     const draw = () => {
       ctx.clearRect(0, 0, size, size);
 
-      // Dashed orbit ring
       ctx.save();
       ctx.beginPath();
       ctx.arc(cx, cx, R, 0, 2 * Math.PI);
@@ -1138,7 +1417,6 @@ function LiveOrbitThumbnail({ activePlanets, size, radius }) {
       ctx.stroke();
       ctx.restore();
 
-      // Orbiting planets
       const elapsed = (Date.now() - t0Ref.current) / 1000;
       const phase   = ringPhaseAt(elapsed, DUR);
       const pts     = planetsRef.current;
@@ -1150,8 +1428,8 @@ function LiveOrbitThumbnail({ activePlanets, size, radius }) {
         const angleRad = (angleDeg * Math.PI) / 180;
         const px = cx + Math.cos(angleRad) * R;
         const py = cx + Math.sin(angleRad) * R;
-        const color = '#b8b4ae'; // moon grey — matches Planet button
-        const PR = 9; // planet radius
+        const color = '#b8b4ae';
+        const PR = 9;
 
         ctx.save();
         ctx.shadowColor = 'rgba(0,0,0,0.35)';
@@ -1165,7 +1443,6 @@ function LiveOrbitThumbnail({ activePlanets, size, radius }) {
         ctx.fill();
         ctx.restore();
 
-        // Border
         ctx.beginPath();
         ctx.arc(px, py, PR, 0, 2 * Math.PI);
         ctx.strokeStyle = '#8a8680';
@@ -1178,7 +1455,7 @@ function LiveOrbitThumbnail({ activePlanets, size, radius }) {
 
     rafRef.current = requestAnimationFrame(draw);
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-  }, []); // setup once — live data read via ref each frame
+  }, []);
 
   return (
     <canvas ref={canvasRef} width={size} height={size}
@@ -1186,7 +1463,7 @@ function LiveOrbitThumbnail({ activePlanets, size, radius }) {
   );
 }
 
-/*  Mini orbit card  */
+// OrbitCard
 function OrbitCard({ orbit, onExpand, onDelete, onEdit }) {
   const { dark } = useTheme();
   const subtasks    = orbit.subtasks || [];
@@ -1251,7 +1528,7 @@ function OrbitCard({ orbit, onExpand, onDelete, onEdit }) {
   );
 }
 
-/*  Page  */
+// Orbit page
 export default function Orbit() {
   const { dark } = useTheme();
   const [orbits, setOrbits]               = useState([]);
