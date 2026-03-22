@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
-import { Component } from 'react';
+import { Component, useEffect } from 'react';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { UndoProvider } from './context/UndoContext';
@@ -18,6 +18,7 @@ import Orbit from './pages/Orbit';
 import VerifyEmail from './pages/VerifyEmail';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
+import moonSphere from './assets/moon-sphere.png';
 
 function PrivateLayout({ children }) {
   const { dark } = useTheme();
@@ -122,6 +123,12 @@ function AppRoutes() {
 }
 
 export default function App() {
+  // Preload the moon sphere image so it's cached before the user opens any orbit
+  useEffect(() => {
+    const img = new Image();
+    img.src = moonSphere;
+  }, []);
+
   return (
     <BrowserRouter>
       <ErrorBoundary>

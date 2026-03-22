@@ -480,7 +480,7 @@ function OrbitView({ node, onClose, onUpdate, cardRect = null, depth = 0 }) {
   const [expandedChild, setExpandedChild]   = useState(null);
   const [zoom, setZoom]                   = useState(1);
   const [escapingPlanets, setEscapingPlanets] = useState({});
-  const [showSubtaskMenu, setShowSubtaskMenu] = useState(true);
+  const [showSubtaskMenu, setShowSubtaskMenu] = useState(false);
   const [sphereSkin, setSphereSkin]       = useState(() => localStorage.getItem('orbit-sphere-skin') || 'moon');
   const [togglingIds, setTogglingIds]     = useState(() => new Set());
   const [menuPos, setMenuPos]             = useState({ x: 12, y: 56 });
@@ -962,10 +962,10 @@ function OrbitView({ node, onClose, onUpdate, cardRect = null, depth = 0 }) {
       <AnimatePresence>
         {showSubtaskMenu && (
           <motion.div
-            initial={{ opacity: 0, x: -16 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -16 }}
-            transition={{ duration: 0.22 }}
+            initial={{ opacity: 0, scale: 0.85, y: 12 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.85, y: 12 }}
+            transition={{ type: 'spring', stiffness: 400, damping: 28 }}
             style={{
               position: 'absolute',
               left: menuPos.x,
